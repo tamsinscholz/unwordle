@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Unwordl</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,700;9..144,900&family=Archivo:wght@500;700;800&display=swap">
+<style>
+/* Layout: one fixed screen — slim header, a 5×10 board that shrinks to fit, keyboard pinned to the bottom. */
+:root {
+  --bg: #fbfaf7;
+  --fg: #1c1b19;
+  --muted: #8a877f;
+  --rule: #dedbd3;
+  --tile-border: #d3d0c7;
+  --tile-filled: #8a877f;
+  --key: #dcd9d0;
+  --key-fg: #1c1b19;
+  --absent: #7b7973;
+  --present: #c9a93a;
+  --correct: #5d9a55;
+  --on-color: #ffffff;
+  --toast-bg: #1c1b19;
+  --toast-fg: #fbfaf7;
+  --display: "Fraunces", Georgia, "Times New Roman", serif;
+  --ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141413; --fg: #f1efe9; --muted: #8d8a83; --rule: #2f2e2b;
+    --tile-border: #3b3a36; --tile-filled: #6a6862; --key: #7f7d77; --key-fg: #f7f6f2;
+    --absent: #3c3b38; --present: #b39532; --correct: #548d4d; --on-color: #ffffff;
+    --toast-bg: #f1efe9; --toast-fg: #141413; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141413; --fg: #f1efe9; --muted: #8d8a83; --rule: #2f2e2b;
+  --tile-border: #3b3a36; --tile-filled: #6a6862; --key: #7f7d77; --key-fg: #f7f6f2;
+  --absent: #3c3b38; --present: #b39532; --correct: #548d4d; --on-color: #ffffff;
+  --toast-bg: #f1efe9; --toast-fg: #141413; color-scheme: dark;
+}
+
+html, body { height: 100%; }
+html { padding-block: env(safe-area-inset-top, 0px) env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--ui);
+  margin: 0;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+#app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  max-width: 500px;
+  margin: 0 auto;
+  padding-inline: 8px;
+  box-sizing: border-box;
+}
+header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 50px;
+  border-bottom: 1px solid var(--rule);
+  margin-inline: -8px;
+}
+h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: 28px;
+  letter-spacing: 0.01em;
+}
+#board-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-block: 10px;
+  position: relative;
+}
+#board {
+  display: grid;
+  grid-template-rows: repeat(10, var(--tile));
+  gap: var(--gap);
+}
+.row {
+  display: grid;
+  grid-template-columns: repeat(5, var(--tile));
+  gap: var(--gap);
+}
+.row.shake { animation: shake 420ms; }
+.tile {
+  width: var(--tile);
+  height: var(--tile);
+  box-sizing: border-box;
+  border: 2px solid var(--tile-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--ui);
+  font-weight: 800;
+  font-size: calc(var(--tile) * 0.52);
+  line-height: 1;
+  text-transform: uppercase;
+  user-select: none;
+}
+.tile.filled { border-color: var(--tile-filled); animation: pop 100ms; }
+.tile.absent, .tile.present, .tile.correct { border-color: transparent; color: var(--on-color); }
+.tile.absent { background: var(--absent); }
+.tile.present { background: var(--present); }
+.tile.correct { background: var(--correct); }
+.tile.flip-in { animation: flip-in 250ms ease-in forwards; }
+.tile.flip-out { animation: flip-out 250ms ease-out forwards; }
+.row.win .tile { animation: bounce 500ms; }
+
+#keyboard {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+  user-select: none;
+}
+.krow { display: flex; gap: 6px; justify-content: center; }
+.krow .spacer { flex: 0.5; }
+.key {
+  flex: 1;
+  height: 54px;
+  min-width: 0;
+  border: 0;
+  border-radius: 4px;
+  background: var(--key);
+  color: var(--key-fg);
+  font-family: var(--ui);
+  font-weight: 700;
+  font-size: 15px;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 150ms;
+}
+.key.wide { flex: 1.5; font-size: 12px; letter-spacing: 0.04em; }
+.key:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.key.absent { background: var(--absent); color: var(--on-color); }
+.key.present { background: var(--present); color: var(--on-color); }
+.key.correct { background: var(--correct); color: var(--on-color); }
+.key svg { width: 22px; height: 22px; }
+
+#toasts {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  z-index: 5;
+}
+.toast {
+  background: var(--toast-bg);
+  color: var(--toast-fg);
+  font-weight: 700;
+  font-size: 14px;
+  padding: 12px 16px;
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: opacity 300ms;
+}
+.toast.fade { opacity: 0; }
+
+@media (max-height: 640px) {
+  .key { height: 46px; }
+  #keyboard { gap: 6px; }
+  header { height: 42px; }
+  h1 { font-size: 24px; }
+}
+
+@keyframes pop { 50% { transform: scale(1.1); } }
+@keyframes flip-in { from { transform: rotateX(0); } to { transform: rotateX(-90deg); } }
+@keyframes flip-out { from { transform: rotateX(-90deg); } to { transform: rotateX(0); } }
+@keyframes shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-4px); }
+  40%, 60% { transform: translateX(4px); }
+}
+@keyframes bounce {
+  0%, 20% { transform: translateY(0); }
+  40% { transform: translateY(-30%); }
+  50% { transform: translateY(5%); }
+  60% { transform: translateY(-15%); }
+  80% { transform: translateY(2%); }
+  100% { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile.filled, .row.shake, .row.win .tile, .tile.flip-in, .tile.flip-out { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header><h1>Unwordl</h1></header>
+  <div id="board-wrap">
+    <div id="toasts" role="status" aria-live="polite"></div>
+    <div id="board" aria-label="Game board"></div>
+  </div>
+  <div id="keyboard" aria-label="Keyboard"></div>
+</div>
+
+<script>
+(() => {
+  const ROWS = 10, COLS = 5;
+  const OPENER = "AUGHT";
+  const SUFFIX = "IGHT";
+  // Every first letter that makes a real ?IGHT word. The game keeps dodging until
+  // you have spent eight of them; the ninth one wins.
+  const CANDIDATES = ["B", "E", "F", "L", "M", "N", "R", "S", "T", "W"];
+  const LOCK_AT = 9;
+  const WIN_WORDS = ["", "Genius", "Magnificent", "Impressive", "Splendid", "Great", "Fine", "Sure", "Eventually", "Phew"];
+  const NEAR_MISS = ["So close", "Nearly", "Ooh, not that one", "Almost had it", "Have you tried another letter?", "Any minute now", "Keep going", "Statistically, soon"];
+
+  const boardEl = document.getElementById("board");
+  const kbEl = document.getElementById("keyboard");
+  const toastsEl = document.getElementById("toasts");
+
+  let state;       // { rows: [{word, marks}], remaining: [...], target: string|null, over: bool }
+  let current = "";
+  let busy = false;
+  let nearMissIdx = 0;
+
+  // ---------- rules ----------
+
+  function score(guess, answer) {
+    const marks = Array(COLS).fill("absent");
+    const pool = {};
+    for (let i = 0; i < COLS; i++) {
+      if (guess[i] === answer[i]) marks[i] = "correct";
+      else pool[answer[i]] = (pool[answer[i]] || 0) + 1;
+    }
+    for (let i = 0; i < COLS; i++) {
+      if (marks[i] === "correct") continue;
+      if (pool[guess[i]]) { marks[i] = "present"; pool[guess[i]]--; }
+    }
+    return marks;
+  }
+
+  // Which still-possible first letters does this guess put to the test?
+  // T only counts in the first slot, since every ?IGHT word ends in T anyway.
+  function tested(guess, remaining) {
+    const hits = remaining.filter(c => c === "T" ? guess[0] === "T" : guess.includes(c));
+    return hits.sort((a, b) => (b === guess[0]) - (a === guess[0]));
+  }
+
+  function judge(guess) {
+    if (!state.target) {
+      const hits = tested(guess, state.remaining);
+      const triedSoFar = CANDIDATES.length - state.remaining.length;
+      if (triedSoFar + hits.length >= LOCK_AT) {
+        // This guess spends the ninth letter: the game finally commits.
+        const need = LOCK_AT - triedSoFar;
+        const lock = hits.includes(guess[0]) ? guess[0] : hits[need - 1];
+        const burned = hits.filter(c => c !== lock).slice(0, need - 1);
+        state.remaining = state.remaining.filter(c => !burned.includes(c));
+        state.target = lock + SUFFIX;
+      } else {
+        state.remaining = state.remaining.filter(c => !hits.includes(c));
+        const stand = state.remaining.find(c => c !== "T" && !guess.includes(c));
+        return score(guess, stand + SUFFIX);
+      }
+    }
+    return score(guess, state.target);
+  }
+
+  function freshState() {
+    return {
+      rows: [{ word: OPENER, marks: ["absent", "absent", "correct", "correct", "correct"] }],
+      remaining: CANDIDATES.slice(),
+      target: null,
+      over: false,
+    };
+  }
+
+  // ---------- rendering ----------
+
+  function buildBoard() {
+    boardEl.innerHTML = "";
+    for (let r = 0; r < ROWS; r++) {
+      const row = document.createElement("div");
+      row.className = "row";
+      for (let c = 0; c < COLS; c++) {
+        const t = document.createElement("div");
+        t.className = "tile";
+        row.appendChild(t);
+      }
+      boardEl.appendChild(row);
+    }
+  }
+
+  function rowEl(r) { return boardEl.children[r]; }
+
+  function paintRow(r, word, marks) {
+    [...rowEl(r).children].forEach((t, i) => {
+      t.textContent = word[i] || "";
+      t.className = "tile" + (marks ? " " + marks[i] : word[i] ? " filled" : "");
+    });
+  }
+
+  function paintCurrent() {
+    const r = state.rows.length;
+    if (r >= ROWS) return;
+    [...rowEl(r).children].forEach((t, i) => {
+      const ch = current[i] || "";
+      if (t.textContent !== ch) {
+        t.textContent = ch;
+        t.className = "tile" + (ch ? " filled" : "");
+      }
+    });
+  }
+
+  const KEY_RANK = { absent: 1, present: 2, correct: 3 };
+  function paintKeys() {
+    const best = {};
+    for (const { word, marks } of state.rows) {
+      for (let i = 0; i < COLS; i++) {
+        const m = marks[i], ch = word[i];
+        if (!best[ch] || KEY_RANK[m] > KEY_RANK[best[ch]]) best[ch] = m;
+      }
+    }
+    kbEl.querySelectorAll(".key[data-letter]").forEach(k => {
+      const m = best[k.dataset.letter];
+      k.className = "key" + (m ? " " + m : "");
+    });
+  }
+
+  function buildKeyboard() {
+    const layout = ["QWERTYUIOP", " ASDFGHJKL ", "+ZXCVBNM-"];
+    for (const line of layout) {
+      const row = document.createElement("div");
+      row.className = "krow";
+      for (const ch of line) {
+        if (ch === " ") {
+          const s = document.createElement("div");
+          s.className = "spacer";
+          row.appendChild(s);
+          continue;
+        }
+        const b = document.createElement("button");
+        b.type = "button";
+        if (ch === "+") {
+          b.className = "key wide"; b.textContent = "Enter"; b.dataset.action = "enter";
+        } else if (ch === "-") {
+          b.className = "key wide"; b.dataset.action = "back"; b.setAttribute("aria-label", "Backspace");
+          b.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22 3H7c-.69 0-1.23.35-1.59.88L0 12l5.41 8.11c.36.53.9.89 1.59.89h15c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H7.07L2.4 12l4.66-7H22v14zm-11.59-2L14 13.41 17.59 17 19 15.59 15.41 12 19 8.41 17.59 7 14 10.59 10.41 7 9 8.41 12.59 12 9 15.59z"/></svg>';
+        } else {
+          b.className = "key"; b.textContent = ch; b.dataset.letter = ch;
+        }
+        row.appendChild(b);
+      }
+      kbEl.appendChild(row);
+    }
+    kbEl.addEventListener("click", e => {
+      const k = e.target.closest(".key");
+      if (!k) return;
+      k.blur();
+      if (k.dataset.letter) type(k.dataset.letter);
+      else if (k.dataset.action === "enter") submit();
+      else if (k.dataset.action === "back") erase();
+    });
+  }
+
+  function toast(msg, ms = 1200) {
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.textContent = msg;
+    toastsEl.prepend(t);
+    if (ms > 0) setTimeout(() => { t.classList.add("fade"); setTimeout(() => t.remove(), 300); }, ms);
+  }
+
+  function shake() {
+    const el = rowEl(state.rows.length);
+    el.classList.remove("shake");
+    void el.offsetWidth;
+    el.classList.add("shake");
+  }
+
+  function fit() {
+    const wrap = document.getElementById("board-wrap");
+    const h = wrap.clientHeight - 20;
+    const w = Math.min(wrap.clientWidth, 350);
+    const gap = Math.max(3, Math.min(5, Math.floor(h / 100)));
+    const tile = Math.floor(Math.min((h - gap * (ROWS - 1)) / ROWS, (w - gap * (COLS - 1)) / COLS, 62));
+    boardEl.style.setProperty("--tile", Math.max(tile, 18) + "px");
+    boardEl.style.setProperty("--gap", gap + "px");
+  }
+
+  // ---------- input ----------
+
+  function type(ch) {
+    if (busy || state.over || current.length >= COLS) return;
+    current += ch;
+    paintCurrent();
+  }
+
+  function erase() {
+    if (busy || state.over || !current) return;
+    current = current.slice(0, -1);
+    paintCurrent();
+  }
+
+  function submit() {
+    if (busy || state.over) return;
+    if (current.length < COLS) { shake(); toast("Not enough letters"); return; }
+
+    const guess = current;
+    const marks = judge(guess);
+    const r = state.rows.length;
+    state.rows.push({ word: guess, marks });
+    current = "";
+    busy = true;
+
+    reveal(r, guess, marks, () => {
+      busy = false;
+      paintKeys();
+      if (marks.every(m => m === "correct")) {
+        state.over = true;
+        rowEl(r).classList.add("win");
+        toast(WIN_WORDS[r] || "Phew", 2400);
+      } else if (state.rows.length >= ROWS) {
+        state.over = true;
+        toast(state.target || (state.remaining.find(c => c !== "T") + SUFFIX), 0);
+      } else if (guess.slice(1) === SUFFIX) {
+        toast(NEAR_MISS[nearMissIdx++ % NEAR_MISS.length]);
+      }
+    });
+  }
+
+  function reveal(r, word, marks, done) {
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) { paintRow(r, word, marks); done(); return; }
+    const tiles = [...rowEl(r).children];
+    tiles.forEach((t, i) => {
+      setTimeout(() => {
+        t.className = "tile filled flip-in";
+        setTimeout(() => { t.className = "tile " + marks[i] + " flip-out"; }, 250);
+      }, i * 300);
+    });
+    setTimeout(() => {
+      tiles.forEach(t => t.classList.remove("flip-out"));
+      done();
+    }, (COLS - 1) * 300 + 520);
+  }
+
+  document.addEventListener("keydown", e => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "Enter") { e.preventDefault(); submit(); }
+    else if (e.key === "Backspace") { e.preventDefault(); erase(); }
+    else if (/^[a-z]$/i.test(e.key)) type(e.key.toUpperCase());
+  });
+
+  // ---------- boot ----------
+
+  function start(saved) {
+    state = saved?.state?.rows ? saved.state : freshState();
+    current = saved?.current || "";
+    buildBoard();
+    state.rows.forEach((row, r) => paintRow(r, row.word, row.marks));
+    paintCurrent();
+    paintKeys();
+    fit();
+  }
+
+  buildKeyboard();
+  addEventListener("resize", fit);
+  start();
+})();
+</script>
+</body>
+</html>
