@@ -168,8 +168,18 @@ h1 {
   align-items: center;
   gap: 8px;
   pointer-events: none;
-  z-index: 5;
+  z-index: 20;
 }
+#rubble {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  overflow: hidden;
+}
+#rubble .tile { position: absolute; left: 0; top: 0; will-change: transform; }
+.toast.tilt { border: 0; font-family: var(--ui); cursor: pointer; pointer-events: auto; }
+
 .toast {
   background: var(--toast-bg);
   color: var(--toast-fg);
@@ -222,6 +232,7 @@ h1 {
   <div id="keyboard" aria-label="Keyboard"></div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
 <script>
 (() => {
   const ROWS = 10, COLS = 5;
@@ -429,6 +440,8 @@ h1 {
     const guess = current;
     const marks = judge(guess);
     const r = state.rows.length;
+    const lost = r === ROWS - 1 && !marks.every(m => m === "correct");
+    if (lost) askForMotion();
     state.rows.push({ word: guess, marks });
     current = "";
     busy = true;
@@ -442,7 +455,8 @@ h1 {
         toast(WIN_WORDS[r] || "Phew", 2400);
       } else if (state.rows.length >= ROWS) {
         state.over = true;
-        toast(state.target || (state.remaining.find(c => c !== "T") + SUFFIX), 0);
+        const answer = state.target || (state.remaining.find(c => c !== "T") + SUFFIX);
+        setTimeout(() => crumble(() => toast(answer, 0)), 500);
       } else if (guess.slice(1) === SUFFIX) {
         toast(NEAR_MISS[nearMissIdx++ % NEAR_MISS.length]);
       }
@@ -471,6 +485,121 @@ h1 {
     else if (e.key === "Backspace") { e.preventDefault(); erase(); }
     else if (/^[a-z]$/i.test(e.key)) type(e.key.toUpperCase());
   });
+
+  // ---------- losing: the board drops and the blocks fall wherever "down" is ----------
+
+  let rubble = null;  // Matter engine and bodies, once the board has dropped
+  let down = { x: 0, y: 1 };  // gravity in screen axes; straight down until the phone says otherwise
+  let motionOn = false;
+  // iOS reports motion with every axis flipped relative to Android and the spec.
+  const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  function crumble(done) {
+    if (!window.Matter || matchMedia("(prefers-reduced-motion: reduce)").matches) { done(); return; }
+    const { Engine, Bodies, Composite } = Matter;
+    const W = innerWidth, H = innerHeight;
+    const gap = parseFloat(boardEl.style.getPropertyValue("--gap")) || 4;
+
+    const layer = document.createElement("div");
+    layer.id = "rubble";
+    document.body.appendChild(layer);
+
+    const engine = Engine.create();
+    const wall = { isStatic: true, friction: 0.8 };
+    Composite.add(engine.world, [
+      Bodies.rectangle(W / 2, H + 50, W * 3, 100, wall),
+      Bodies.rectangle(W / 2, -50, W * 3, 100, wall),
+      Bodies.rectangle(-50, H / 2, 100, H * 3, wall),
+      Bodies.rectangle(W + 50, H / 2, 100, H * 3, wall),
+    ]);
+
+    // One body per tile. Bodies are a gap taller than the tile so rows rest on each
+    // other, and each one starts a hair off true so the stack can't land perfectly.
+    const blocks = [...boardEl.querySelectorAll(".tile")].map(tile => {
+      const b = tile.getBoundingClientRect();
+      const el = tile.cloneNode(true);
+      el.style.width = b.width + "px";
+      el.style.height = b.height + "px";
+      layer.appendChild(el);
+      const body = Bodies.rectangle(b.left + b.width / 2, b.top + b.height / 2, b.width, b.height + gap - 0.5, {
+        friction: 0.7, frictionStatic: 1, restitution: 0.05, density: 0.002,
+        angle: (Math.random() - 0.5) * 0.06,
+      });
+      Composite.add(engine.world, body);
+      return { el, body, w: b.width, h: b.height };
+    });
+    boardEl.style.visibility = "hidden";
+
+    rubble = { engine, bodies: blocks.map(k => k.body) };
+    applyGravity();
+    let lastT = performance.now();
+    function frame(now) {
+      Engine.update(engine, Math.min(now - lastT, 32));
+      lastT = now;
+      for (const k of blocks) {
+        const { x, y } = k.body.position;
+        k.el.style.transform = `translate(${x - k.w / 2}px, ${y - k.h / 2}px) rotate(${k.body.angle}rad)`;
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+    setTimeout(() => {
+      done();
+      if (IOS && !motionOn && typeof DeviceMotionEvent?.requestPermission === "function") offerTap();
+    }, 2200);
+  }
+
+  function applyGravity() {
+    if (!rubble) return;
+    rubble.engine.gravity.x = down.x * 1.3;
+    rubble.engine.gravity.y = down.y * 1.3;
+  }
+
+  // Called from the losing tap/keypress: iOS only hands out motion data during one.
+  function askForMotion() {
+    if (motionOn || !("DeviceMotionEvent" in window)) return;
+    if (typeof DeviceMotionEvent.requestPermission !== "function") { listenForMotion(); return; }
+    DeviceMotionEvent.requestPermission().then(r => r === "granted" && listenForMotion()).catch(() => {});
+  }
+
+  // Fallback for iOS when the losing tap did not get motion access through.
+  function offerTap() {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "toast tilt";
+    b.textContent = "Tap, then tilt your phone";
+    b.addEventListener("click", () => { b.remove(); askForMotion(); });
+    toastsEl.appendChild(b);
+  }
+
+  function listenForMotion() {
+    if (motionOn) return;
+    motionOn = true;
+    let gx = null, gy = null;
+    addEventListener("devicemotion", e => {
+      const a = e.accelerationIncludingGravity;
+      if (!a || a.x == null || a.y == null) return;
+      const flip = IOS ? -1 : 1;
+      const ax = a.x * flip, ay = a.y * flip;
+      // Turn device axes into screen axes (x right, y down), whatever way the screen is rotated.
+      const th = ((screen.orientation?.angle ?? window.orientation ?? 0) * Math.PI) / 180;
+      const sx = -ax * Math.cos(th) + ay * Math.sin(th);
+      const sy = ax * Math.sin(th) + ay * Math.cos(th);
+      // Slow-moving part is "down"; the fast part is the phone being shaken.
+      if (gx === null) { gx = sx; gy = sy; }
+      gx += (sx - gx) * 0.12;
+      gy += (sy - gy) * 0.12;
+      down = { x: gx / 9.81, y: gy / 9.81 };
+      applyGravity();
+      const jx = sx - gx, jy = sy - gy;
+      if (rubble && Math.hypot(jx, jy) > 2.5) {
+        for (const b of rubble.bodies) {
+          Matter.Body.setVelocity(b, { x: b.velocity.x + jx * 0.6, y: b.velocity.y + jy * 0.6 });
+          Matter.Body.setAngularVelocity(b, b.angularVelocity + (Math.random() - 0.5) * 0.1);
+        }
+      }
+    });
+  }
 
   // ---------- boot ----------
 
